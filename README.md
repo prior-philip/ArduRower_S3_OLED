@@ -3,7 +3,7 @@
 Port of https://github.com/zpukr/ArduRower (original: Heltec WiFi Kit 32 + SSD1306 128x64).
 
 ## Arduino IDE setup
-- Board package: **esp32 by Espressif** (Boards Manager), board **ESP32S3 Dev Module**
+- Board package: **esp32 by Espressif 3.3.x** (Boards Manager; tested with 3.3.13 and 2.0.9, **not 4.x** - it has a new BLE API), board **ESP32S3 Dev Module**
 - Tools > **USB CDC On Boot: Enabled**
 - Library Manager: **U8g2**
 - Open `ArduRower_S3_OLED/ArduRower_S3_OLED.ino` (RunningAverage.h/.cpp stay in the same folder)

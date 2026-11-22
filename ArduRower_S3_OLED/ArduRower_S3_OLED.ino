@@ -1,3 +1,7 @@
+#include <Arduino.h>
+#if ESP_ARDUINO_VERSION_MAJOR >= 4
+#error "This sketch uses the BLEDevice API (esp32 core 2.x/3.x). Install esp32 core 3.3.x in Boards Manager - core 4.x has a new BLE API."
+#endif
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
