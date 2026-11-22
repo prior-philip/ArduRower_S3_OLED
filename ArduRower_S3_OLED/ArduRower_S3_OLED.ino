@@ -16,6 +16,7 @@
 #include <U8g2lib.h>
 #include "driver/rtc_io.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 
 // ===========================================================================
 //  ESP32-S3-Zero (Waveshare) + SH1107 128x128 I2C OLED  -  ArduRower port
@@ -184,7 +185,27 @@ volatile unsigned long lastActivityMs = 0;   // last sensor pulse, for idle deep
 /*-----------------CONSTANTS-------------------------------*/
 //const float Ratio = 4.8; // from old script 4.8; meters per rpm = circumference of rotor (D=34cm) -> 1,068m -> Ratio = 0.936 ; WaterRower 7,3 m/St. -> Ratio: 3.156
 //const float Ratio = 0.79; //one magnet
-const float Ratio = 3.156;
+
+// ---- Rotor magnets -------------------------------------------------------
+// Number of magnets per flywheel/rotor revolution (= reed pulses per revolution).
+// The original firmware was built for 4 magnets (Ratio 3.156 = 4 x 0.789 clicks per meter).
+#define MAGNETS_PER_ROUND 4
+#define CLICKS_PER_METER_PER_MAGNET 0.789f
+const float Ratio = MAGNETS_PER_ROUND * CLICKS_PER_METER_PER_MAGNET;   // clicks per meter
+// Stroke detection scales with the pulse rate: original values 20 (4 magnets) / 3 (1 magnet)
+#define STROKE_ACCEL_THRESHOLD ((MAGNETS_PER_ROUND) == 1 ? 3 : 5 * (MAGNETS_PER_ROUND))
+#define STROKE_PUFFER (5 * (MAGNETS_PER_ROUND))                     // clicks to ignore after a stroke
+
+// ---- Simulation (demo mode) ----------------------------------------------
+// Hold the BOOT button for 1 s on the "Waiting for start" screen to feed the normal
+// processing chain (display + BLE to watch/app) with a simulated rower. Any button press stops it.
+#define SIM_SPM         30      // simulated strokes per minute
+#define SIM_V_BASE      3.4f    // m/s during the recovery
+#define SIM_V_PEAK      1.6f    // extra m/s at the peak of the drive
+#define SIM_DRIVE_FRAC  0.35f   // part of a stroke cycle that is the drive
+volatile bool simActive = false;
+void startSimulation();
+void stopSimulation();
 
 RunningAverage stm_RA(21); // size of array for strokes/min
 RunningAverage mps_RA(7); // size of array for meters/second -> emulates momentum of boat
@@ -619,7 +640,8 @@ void drawWaitingScreen() {
   drawCentered(60, "Waiting");
   drawCentered(84, "for start");
   u8g2.setFont(u8g2_font_helvB08_tr);
-  drawCentered(120, "sleeps when idle");
+  drawCentered(108, "hold BOOT 1s: demo");
+  drawCentered(121, "sleeps when idle");
   u8g2.sendBuffer();
 }
 
@@ -651,13 +673,25 @@ void row_start() {
   drawWaitingScreen();
   delay(100);
   lastActivityMs = millis();
+  unsigned long pressStart = 0;
   while (clicks == 0) {
     if (millis() - lastActivityMs > IDLE_SLEEP_MS) goToSleep();
+    if (digitalRead(BUTTONSPIN) == LOW) {          // long press BOOT -> demo mode
+      if (pressStart == 0) pressStart = millis();
+      else if (!simActive && millis() - pressStart > 1000) {
+        startSimulation();
+        while (digitalRead(BUTTONSPIN) == LOW) delay(10);   // wait for release, it would stop the demo
+        delay(50);
+      }
+    } else {
+      pressStart = 0;
+    }
     delay(10);
   }
 
   reset();
   rowing();
+  if (simActive) stopSimulation();                 // button press / disconnect ends the demo
 }
 
 void variableParameter(){
@@ -719,9 +753,9 @@ void IRAM_ATTR calcrpm() {
   rpm = 60000 / (click_time - last_click_time);
   last_click_time = click_time;
   accel = rpm - old_rpm;
-  if ((accel > 20) && (puffer == 0)){ // > 20 to eliminate micro "acceleration" due to splashing water (3 for one magnet)
+  if ((accel > STROKE_ACCEL_THRESHOLD) && (puffer == 0)){ // threshold eliminates micro "acceleration" due to splashing water (20 for 4 magnets, 3 for one)
     strokes ++;
-    puffer = 20; // prevents counting two strokes due to still accelerating rotor
+    puffer = STROKE_PUFFER; // prevents counting two strokes due to still accelerating rotor
   }
   if (puffer > 0){
     puffer --;
@@ -752,6 +786,60 @@ void IRAM_ATTR rowerdebounceinterrupt() {
     rowerinterrupt();
     last_micros = micros();
   }
+}
+
+/*-----simulation (demo mode)------*/
+static esp_timer_handle_t simTimer = nullptr;
+static float simT = 0;          // position in the stroke cycle [s]
+static float simAcc = 0;        // fractional clicks
+static int64_t simLastUs = 0;
+
+// runs every 1 ms: speed profile of a rower (drive = speed up, recovery = constant), turned into reed pulses
+static void simTick(void *) {
+  int64_t now = esp_timer_get_time();
+  float dt = (now - simLastUs) * 1e-6f;
+  simLastUs = now;
+  const float period = 60.0f / SIM_SPM;
+  const float drive = SIM_DRIVE_FRAC * period;
+  simT += dt;
+  if (simT >= period) simT -= period;
+  float v = SIM_V_BASE;                                    // m/s
+  if (simT < drive) {
+    float sn = sinf(PI * simT / drive);
+    v += SIM_V_PEAK * sn * sn;
+  }
+  simAcc += v * Ratio * dt;                                // clicks = meters * clicks/meter
+  while (simAcc >= 1.0f) {
+    simAcc -= 1.0f;
+    rowerinterrupt();                                      // closing edge  -> counts a click
+    rowerinterrupt();                                      // opening edge  -> ignored (as with the real switch)
+  }
+}
+
+void startSimulation() {
+  SerialDebug.println("Simulation ON: " + String(SIM_SPM) + " spm");
+  detachInterrupt(ROWERINPUT);
+  rotation = 0;
+  simT = 0;
+  simAcc = 0;
+  simLastUs = esp_timer_get_time();
+  if (!simTimer) {
+    esp_timer_create_args_t args = {};
+    args.callback = &simTick;
+    args.name = "sim";
+    esp_timer_create(&args, &simTimer);
+  }
+  esp_timer_start_periodic(simTimer, 1000);
+  simActive = true;
+}
+
+void stopSimulation() {
+  if (!simActive) return;
+  esp_timer_stop(simTimer);
+  simActive = false;
+  clicks = 0;                                              // back to "Waiting for start"
+  attachInterrupt(ROWERINPUT, rowerdebounceinterrupt, CHANGE);
+  SerialDebug.println("Simulation OFF");
 }
 
 //calculate and return meters per second
@@ -860,6 +948,11 @@ void drawRowingScreen() {
   char buf[16];
 
   u8g2.clearBuffer();
+
+  if (simActive) {                       // demo mode marker
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(0, 11, "SIM");
+  }
 
 #if ENABLE_BATTERY
   int bat = constrain((int)battery_RA.getAverage(), 0, 127);

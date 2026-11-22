@@ -21,6 +21,14 @@ No reed pulse for `IDLE_SLEEP_MS` (5 min) -> display off + deep sleep. The next 
 (GPIO2 LOW, internal pull-up kept in sleep) wakes and restarts the sketch (~1 s boot).
 Make sure the reed switch is not parked closed, otherwise it wakes immediately.
 
+## Options (top of the sketch)
+- `MAGNETS_PER_ROUND` (default 4): magnets on the rotor = reed pulses per revolution. Meters per pulse
+  and the stroke-detection thresholds scale with it (4 -> 3.156 pulses/m as in the original firmware).
+  Values other than 4 are scaled from the original 4-magnet/1-magnet settings and not tested on a rower.
+- Demo mode: on the "Waiting for start" screen hold BOOT for 1 s. A simulated rower (`SIM_SPM` = 30 strokes/min,
+  about 3.7 m/s) feeds the normal chain, so display and BLE data to the watch/app can be checked without a rower.
+  "SIM" is shown top-left; any button press ends it. Allow ~20 s for the stroke rate average to settle.
+
 Screen rotation: `DISPLAY_ROTATION` (default U8G2_R1 like AirSuspension).
 
 ---
