@@ -36,11 +36,27 @@ averages, the timer stops a few seconds after the last stroke (about 7 s) and st
 ## Garmin data field
 A Connect IQ data field for the fenix 7X is in [`ConnectIQ/`](ConnectIQ/README.md).
 
+## Sensor concept (`SENSOR_MODE`)
+- `SENSOR_PULLEY` (default): one magnet on the strap deflection pulley (`PULLEY_DIAMETER_CM`, 11 cm).
+  The pulley turns forward on the drive and back on the recovery, so a stroke shows as
+  3 drive pulses, a pause at the finish, 3 recovery pulses and a longer pause at the catch.
+  A stroke is counted at the first pulse after the catch pause (gap >= `STROKE_GAP_MIN_MS` and
+  >= `STROKE_GAP_PCT` % of the median pulse interval, not earlier than `STROKE_LOCKOUT_PCT` % of the
+  last stroke). Stroke rate = average of the last 3 stroke periods.
+  Boat speed is **estimated**: `SPEED_FACTOR_K` x handle speed over the first `DRIVE_SPEED_INTERVALS`
+  intervals of the drive (average of the last 3 strokes); distance = speed integrated over time,
+  power = 2.8 x speed^3. Without a reference monitor, K = 2.8 is a starting value: if you know a real
+  distance, set `K_new = K_old x real / shown`.
+- `SENSOR_FLYWHEEL`: magnet(s) on the paddle/flywheel shaft as in the original ArduRower
+  (`MAGNETS_PER_ROUND`, see below). Gives real distance without calibration.
+
+`tools/replay_pulse_log.py <log>` replays a raw pulse log (`PULSE_LOG 1`) through the pulley logic on a PC.
+
 ## Options (top of the sketch)
 - `MAGNETS_PER_ROUND` (default 4): magnets on the rotor = reed pulses per revolution. Meters per pulse
   and the stroke-detection thresholds scale with it (4 -> 3.156 pulses/m as in the original firmware).
   Values other than 4 are scaled from the original 4-magnet/1-magnet settings and not tested on a rower.
-- Demo mode: on the "Waiting for start" screen hold BOOT for 1 s. A simulated rower (`SIM_SPM` = 30 strokes/min,
+- Demo mode (in pulley mode it replays the recorded pulley pulse pattern): on the "Waiting for start" screen hold BOOT for 1 s. A simulated rower (`SIM_SPM` = 30 strokes/min,
   about 3.7 m/s) feeds the normal chain, so display and BLE data to the watch/app can be checked without a rower.
   "SIM" is shown top-left; any button press ends it. Allow ~20 s for the stroke rate average to settle.
 

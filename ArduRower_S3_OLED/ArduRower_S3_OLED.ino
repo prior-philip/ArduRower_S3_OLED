@@ -195,7 +195,25 @@ volatile unsigned long lastActivityMs = 0;   // last sensor pulse, for idle deep
 //const float Ratio = 4.8; // from old script 4.8; meters per rpm = circumference of rotor (D=34cm) -> 1,068m -> Ratio = 0.936 ; WaterRower 7,3 m/St. -> Ratio: 3.156
 //const float Ratio = 0.79; //one magnet
 
-// ---- Rotor magnets -------------------------------------------------------
+// ---- Sensor concept ------------------------------------------------------
+// SENSOR_FLYWHEEL: magnet(s) on the paddle/flywheel shaft, turning one way (original ArduRower).
+// SENSOR_PULLEY:   one magnet on the strap deflection pulley. The pulley turns forward on the
+//                  drive and back on the recovery; strokes are detected from the pauses at the
+//                  catch and the boat speed is estimated from the handle speed during the drive.
+#define SENSOR_FLYWHEEL 0
+#define SENSOR_PULLEY   1
+#define SENSOR_MODE SENSOR_PULLEY
+
+// -- pulley mode settings
+#define PULLEY_DIAMETER_CM   11.0f  // strap runs over this pulley, 1 magnet = 1 pulse per turn
+#define SPEED_FACTOR_K       2.8f   // boat speed [m/s] = K x handle speed during the drive. Calibrate:
+                                    // K_new = K_old x (real distance / shown distance)
+#define STROKE_GAP_MIN_MS    400    // a pulse gap must be at least this long ...
+#define STROKE_GAP_PCT       160    // ... and this % of the median pulse interval to start a stroke
+#define STROKE_LOCKOUT_PCT   70     // ignore gaps earlier than this % of the last stroke period (finish)
+#define DRIVE_SPEED_INTERVALS 2     // pulse intervals at the start of the drive used for handle speed
+
+// ---- Rotor magnets (flywheel mode) ---------------------------------------
 // Number of magnets per flywheel/rotor revolution (= reed pulses per revolution).
 // The original firmware was built for 4 magnets (Ratio 3.156 = 4 x 0.789 clicks per meter).
 #define MAGNETS_PER_ROUND 4
@@ -210,7 +228,7 @@ const float Ratio = MAGNETS_PER_ROUND * CLICKS_PER_METER_PER_MAGNET;   // clicks
 //   E,<micros>,<level>      level 0 = contact closed (magnet at the switch), 1 = open
 // to analyse the pulse pattern (e.g. magnet on the deflection pulley). Capture with the
 // Arduino Serial Monitor (115200) or any terminal and save to a file.
-#define PULSE_LOG 1
+#define PULSE_LOG 0
 #define PULSE_LOG_SIZE 512                 // ring buffer entries (edges between two prints)
 
 // ---- Simulation (demo mode) ----------------------------------------------
@@ -801,6 +819,117 @@ void IRAM_ATTR calcrpm() {
   old_rpm = rpm;
 }
 
+#if SENSOR_MODE == SENSOR_PULLEY
+// ---- pulley mode stroke detection (integer only: runs in the GPIO interrupt) ----
+volatile uint32_t pLastPulseMs = 0;
+volatile uint32_t pLastStrokeMs = 0;
+volatile uint32_t pDriveStartMs = 0;
+volatile int8_t   pDriveCount = -1;          // intervals measured in the current drive, -1 = idle
+volatile uint32_t pLastPeriod = 0;           // ms between the last two strokes, 0 = none
+volatile uint32_t pPeriods[3];               // last stroke periods
+volatile uint8_t  pPeriodIdx = 0, pPeriodCnt = 0;
+volatile uint32_t pDriveMs[3];               // last drive measurement times
+volatile uint8_t  pDriveIdx = 0, pDriveCnt = 0;
+volatile uint32_t pIv[8];                    // recent pulse intervals (without gaps)
+volatile uint8_t  pIvIdx = 0, pIvCnt = 0;
+
+float pulleySpm = 0;                         // updated 1x/s in the main loop
+float pulleyMs = 0;
+float metersF = 0;
+
+static uint32_t IRAM_ATTR pulleyMedianIv() {
+  uint32_t a[8];
+  uint8_t n = pIvCnt;
+  for (uint8_t i = 0; i < n; i++) {          // insertion sort, max 8 values
+    uint32_t v = pIv[i];
+    int8_t j = i - 1;
+    while (j >= 0 && a[j] > v) { a[j + 1] = a[j]; j--; }
+    a[j + 1] = v;
+  }
+  return a[n / 2];
+}
+
+void IRAM_ATTR pulleyPulse() {
+  uint32_t t = millis();
+  uint32_t iv = t - pLastPulseMs;
+  pLastPulseMs = t;
+  uint32_t med = (pIvCnt >= 4) ? pulleyMedianIv() : 300;
+  uint32_t since = t - pLastStrokeMs;
+  uint32_t lock = (pLastPeriod > 0) ? pLastPeriod * STROKE_LOCKOUT_PCT / 100 : 1000;
+  bool gap = (iv >= STROKE_GAP_MIN_MS) && (iv * 100 > med * STROKE_GAP_PCT);
+
+  if (gap && since >= lock) {                // catch -> new stroke, drive starts with this pulse
+    if (pLastStrokeMs != 0 && since < 6000) {
+      pLastPeriod = since;
+      pPeriods[pPeriodIdx] = since;
+      pPeriodIdx = (pPeriodIdx + 1) % 3;
+      if (pPeriodCnt < 3) pPeriodCnt++;
+    } else {
+      pLastPeriod = 0;                       // first stroke after a pause
+    }
+    pLastStrokeMs = t;
+    strokes++;
+    pDriveStartMs = t;
+    pDriveCount = 0;
+  } else if (gap) {                          // finish (handle reverses): drive is over
+    pDriveCount = -1;
+  } else {
+    pIv[pIvIdx] = iv;
+    pIvIdx = (pIvIdx + 1) % 8;
+    if (pIvCnt < 8) pIvCnt++;
+    if (pDriveCount >= 0 && ++pDriveCount == DRIVE_SPEED_INTERVALS) {
+      pDriveMs[pDriveIdx] = t - pDriveStartMs;
+      pDriveIdx = (pDriveIdx + 1) % 3;
+      if (pDriveCnt < 3) pDriveCnt++;
+      pDriveCount = -1;
+    }
+  }
+}
+
+// 1x per second: stroke rate and estimated boat speed from the last 3 strokes
+void pulleyUpdate() {
+  const float circ = PULLEY_DIAMETER_CM * PI / 100.0f;   // m of strap per pulse
+  uint32_t now = millis();
+  uint32_t per = 0, drv = 0;
+  uint8_t np = pPeriodCnt, nd = pDriveCnt;
+  for (uint8_t i = 0; i < np; i++) per += pPeriods[i];
+  for (uint8_t i = 0; i < nd; i++) drv += pDriveMs[i];
+  if (np) per /= np;
+  if (nd) drv /= nd;
+  uint32_t since = now - pLastStrokeMs;
+  uint32_t timeout = (per > 0) ? max((uint32_t)3000, 2 * per) : 3000;
+
+  if (pLastStrokeMs != 0 && since < timeout) {
+    pulleySpm = (per > 0) ? 60000.0f / per : 0;
+    pulleyMs = (drv > 0) ? SPEED_FACTOR_K * circ * DRIVE_SPEED_INTERVALS * 1000.0f / drv : 0;
+  } else {                                   // stopped: forget the history
+    pulleySpm = 0;
+    pulleyMs = 0;
+    pPeriodCnt = 0;
+    pDriveCnt = 0;
+    pLastPeriod = 0;
+  }
+}
+
+void pulleyReset() {
+  pLastStrokeMs = 0;
+  pLastPeriod = 0;
+  pPeriodCnt = 0;
+  pDriveCnt = 0;
+  pIvCnt = 0;
+  pDriveCount = -1;
+  pulleySpm = 0;
+  pulleyMs = 0;
+  metersF = 0;
+  if (pLastPulseMs != 0 && millis() - pLastPulseMs < 1000) {   // the pulse that started the session
+    pLastStrokeMs = pLastPulseMs;                                // is the first drive
+    strokes = 1;
+    pDriveStartMs = pLastPulseMs;
+    pDriveCount = 0;
+  }
+}
+#endif
+
 void IRAM_ATTR rowerinterrupt() {
   lastActivityMs = millis();
   /*  if (trigger == 0) {
@@ -810,7 +939,11 @@ void IRAM_ATTR rowerinterrupt() {
   if (rotation == 0){ // prevents double-count due to switch activating twice on the magnet passing once
     clicks++;
     rotation = 1;
+#if SENSOR_MODE == SENSOR_PULLEY
+    pulleyPulse();
+#else
     calcrpm();
+#endif
   } else {
     rotation = 0;
   }
@@ -858,6 +991,7 @@ void IRAM_ATTR rowerdebounceinterrupt() {
   pulseLogAdd();
 #endif
   if ((long)(micros() - last_micros) >= debouncing_time * 1000) {
+    if (digitalRead(ROWERINPUT) == LOW) rotation = 0;   // stay in sync: count on the closing edge
     rowerinterrupt();
     last_micros = micros();
   }
@@ -870,10 +1004,36 @@ static float simAcc = 0;        // fractional clicks
 static int64_t simLastUs = 0;
 
 // runs every 1 ms: speed profile of a rower (drive = speed up, recovery = constant), turned into reed pulses
+static inline void simPulse() {
+  rowerinterrupt();                                        // closing edge  -> counts a pulse
+  rowerinterrupt();                                        // opening edge  -> ignored
+}
+
 static void simTick(void *) {
   int64_t now = esp_timer_get_time();
   float dt = (now - simLastUs) * 1e-6f;
   simLastUs = now;
+#if SENSOR_MODE == SENSOR_PULLEY
+  // pulse pattern recorded on the pulley (one 2.335 s stroke): 3 drive pulses, finish pause,
+  // 3 recovery pulses, catch pause - scaled to SIM_SPM
+  static const uint16_t off[6] = { 0, 290, 535, 985, 1315, 1585 };
+  const float per = 60.0f / SIM_SPM;
+  const float scale = per / 2.335f;
+  float t0 = simT, t1 = simT + dt;
+  for (int k = 0; k < 6; k++) {
+    float o = off[k] * scale / 1000.0f;
+    if (t0 < o && o <= t1) simPulse();
+  }
+  if (t1 >= per) {
+    t1 -= per;
+    simPulse();                                            // offset 0 of the next stroke
+    for (int k = 1; k < 6; k++) {
+      if (off[k] * scale / 1000.0f <= t1) simPulse();
+    }
+  }
+  simT = t1;
+  return;
+#endif
   const float period = 60.0f / SIM_SPM;
   const float drive = SIM_DRIVE_FRAC * period;
   simT += dt;
@@ -919,6 +1079,17 @@ void stopSimulation() {
 
 //calculate and return meters per second
 float calcmetersmin() {
+#if SENSOR_MODE == SENSOR_PULLEY
+  static unsigned long lastCalc = 0;
+  unsigned long nowMs = millis();
+  float dt = (lastCalc == 0) ? 1.0f : (nowMs - lastCalc) / 1000.0f;
+  lastCalc = nowMs;
+  pulleyUpdate();
+  metersF += pulleyMs * dt;
+  meters = (int)metersF;
+  stm = (strokes * 60000) / (millis() - start);
+  return pulleyMs;
+#endif
   meters = clicks / Ratio;
   stm = (strokes*60000)/(millis()-start);
   mps_RA.addValue((clicks - clicks_old) / Ratio);
@@ -973,6 +1144,9 @@ void reset() {
   rpm = 0;
   stm_RA.clear();
   mps_RA.clear();
+#if SENSOR_MODE == SENSOR_PULLEY
+  pulleyReset();
+#endif
   trend = 0;
   resetTimer = 0;
   //lcd.clear();
@@ -1146,7 +1320,11 @@ void rowing() {
       /*calculate moving average of strokes/min*/
       old_spm = (int)spm;
       calcstmra();
+#if SENSOR_MODE == SENSOR_PULLEY
+      spm = pulleySpm;
+#else
       spm = stm_RA.getAverage()*60;
+#endif
 
       // connecting
       if (deviceConnected && !oldDeviceConnected) {
