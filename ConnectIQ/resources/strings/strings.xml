@@ -1,0 +1,28 @@
+<strings>
+    <string id="AppName">ArduRower S3</string>
+
+    <string id="SmallFieldTitle">Value in small fields</string>
+    <string id="OptPace">Pace /500m</string>
+    <string id="OptPower">Power</string>
+    <string id="OptSpm">Stroke rate</string>
+    <string id="OptDistance">Distance</string>
+    <string id="OptTime">Rowing time</string>
+
+    <string id="SpmChart">Stroke Rate</string>
+    <string id="SpmLabel">Stroke Rate</string>
+    <string id="SpmUnits">spm</string>
+    <string id="PowerChart">Rowing Power</string>
+    <string id="PowerLabel">Power</string>
+    <string id="PowerUnits">W</string>
+    <string id="PaceChart">Pace /500m</string>
+    <string id="PaceLabel">Pace /500m</string>
+    <string id="PaceUnits">s</string>
+
+    <string id="AvgSpmLabel">Avg Stroke Rate</string>
+    <string id="AvgPowerLabel">Avg Power</string>
+    <string id="AvgPaceLabel">Avg Pace /500m</string>
+    <string id="DistLabel">Rowing Distance</string>
+    <string id="DistUnits">m</string>
+    <string id="StrokesLabel">Strokes</string>
+    <string id="StrokesUnits">strokes</string>
+</strings>

@@ -1,0 +1,4 @@
+<properties>
+    <!-- 0 pace, 1 power, 2 stroke rate, 3 distance, 4 time -->
+    <property id="smallField" type="number">0</property>
+</properties>

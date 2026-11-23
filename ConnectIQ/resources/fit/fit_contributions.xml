@@ -1,0 +1,26 @@
+<resources>
+    <fitContributions>
+        <!-- record (chart) fields, ids must match source/ArduRowerView.mc -->
+        <fitField id="0" displayInChart="true" sortOrder="0" precision="0"
+            chartTitle="@Strings.SpmChart" dataLabel="@Strings.SpmLabel"
+            unitLabel="@Strings.SpmUnits" fillColor="#1E88E5"/>
+        <fitField id="1" displayInChart="true" sortOrder="1" precision="0"
+            chartTitle="@Strings.PowerChart" dataLabel="@Strings.PowerLabel"
+            unitLabel="@Strings.PowerUnits" fillColor="#E53935"/>
+        <fitField id="2" displayInChart="true" sortOrder="2" precision="0"
+            chartTitle="@Strings.PaceChart" dataLabel="@Strings.PaceLabel"
+            unitLabel="@Strings.PaceUnits" fillColor="#43A047"/>
+
+        <!-- session (activity summary) fields -->
+        <fitField id="5" displayInActivitySummary="true" sortOrder="3" precision="1"
+            dataLabel="@Strings.AvgSpmLabel" unitLabel="@Strings.SpmUnits"/>
+        <fitField id="6" displayInActivitySummary="true" sortOrder="4" precision="0"
+            dataLabel="@Strings.AvgPowerLabel" unitLabel="@Strings.PowerUnits"/>
+        <fitField id="7" displayInActivitySummary="true" sortOrder="5" precision="0"
+            dataLabel="@Strings.AvgPaceLabel" unitLabel="@Strings.PaceUnits"/>
+        <fitField id="8" displayInActivitySummary="true" sortOrder="6" precision="0"
+            dataLabel="@Strings.DistLabel" unitLabel="@Strings.DistUnits"/>
+        <fitField id="9" displayInActivitySummary="true" sortOrder="7" precision="0"
+            dataLabel="@Strings.StrokesLabel" unitLabel="@Strings.StrokesUnits"/>
+    </fitContributions>
+</resources>
