@@ -23,6 +23,11 @@ Port of https://github.com/zpukr/ArduRower (original: Heltec WiFi Kit 32 + SSD13
   (the BLE link drops). The next reed pulse (GPIO2 LOW, internal pull-up kept in sleep) wakes and restarts the sketch (~1 s boot).
 - Make sure the reed switch is not parked closed, otherwise it wakes immediately.
 
+## Raw pulse log
+With `PULSE_LOG 1` every raw reed edge (before debouncing) is printed over USB serial (115200) as
+`E,<micros>,<level>` (0 = contact closed, 1 = open). Used to analyse the pulse pattern, e.g. with the
+magnet on the deflection pulley. Set to 0 for normal use.
+
 ## Timer
 The elapsed time pauses while m/s or strokes/min is zero (below 0.05 m/s / 1 spm) and resumes when both are
 non-zero again. The averages sent over BLE use this moving time too. Because m/s and strokes/min are rolling

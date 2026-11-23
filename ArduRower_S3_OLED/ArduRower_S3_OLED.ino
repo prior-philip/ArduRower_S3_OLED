@@ -205,6 +205,14 @@ const float Ratio = MAGNETS_PER_ROUND * CLICKS_PER_METER_PER_MAGNET;   // clicks
 #define STROKE_ACCEL_THRESHOLD ((MAGNETS_PER_ROUND) == 1 ? 3 : 5 * (MAGNETS_PER_ROUND))
 #define STROKE_PUFFER (5 * (MAGNETS_PER_ROUND))                     // clicks to ignore after a stroke
 
+// ---- Raw pulse logging --------------------------------------------------
+// 1 = print every raw reed edge (before debouncing) over USB serial as
+//   E,<micros>,<level>      level 0 = contact closed (magnet at the switch), 1 = open
+// to analyse the pulse pattern (e.g. magnet on the deflection pulley). Capture with the
+// Arduino Serial Monitor (115200) or any terminal and save to a file.
+#define PULSE_LOG 1
+#define PULSE_LOG_SIZE 512                 // ring buffer entries (edges between two prints)
+
 // ---- Simulation (demo mode) ----------------------------------------------
 // Hold the BOOT button for 1 s on the "Waiting for start" screen to feed the normal
 // processing chain (display + BLE to watch/app) with a simulated rower. Any button press stops it.
@@ -704,6 +712,7 @@ void row_start() {
   lastActivityMs = millis();
   unsigned long pressStart = 0;
   while (clicks == 0) {
+    pulseLogFlush();
     if (idleTooLong()) goToSleep();
     if (digitalRead(BUTTONSPIN) == LOW) {          // long press BOOT -> demo mode
       if (pressStart == 0) pressStart = millis();
@@ -810,7 +819,44 @@ void IRAM_ATTR rowerinterrupt() {
 
 
 /*-----debounce------*/
+#if PULSE_LOG
+volatile uint32_t plogT[PULSE_LOG_SIZE];
+volatile uint8_t  plogL[PULSE_LOG_SIZE];
+volatile uint16_t plogHead = 0, plogTail = 0;
+volatile uint32_t plogLost = 0;
+
+static inline void IRAM_ATTR pulseLogAdd() {
+  uint16_t next = (plogHead + 1) % PULSE_LOG_SIZE;
+  if (next == plogTail) { plogLost++; return; }   // buffer full
+  plogT[plogHead] = micros();
+  plogL[plogHead] = digitalRead(ROWERINPUT);
+  plogHead = next;
+}
+
+// prints buffered edges, call often from the main loops
+void pulseLogFlush() {
+  static bool header = false;
+  if (!header) {
+    SerialDebug.println("# ArduRower raw pulse log: E,<micros>,<level 0=closed 1=open>");
+    header = true;
+  }
+  if (plogLost) {
+    SerialDebug.printf("# lost %lu edges\n", (unsigned long)plogLost);
+    plogLost = 0;
+  }
+  while (plogTail != plogHead) {
+    SerialDebug.printf("E,%lu,%u\n", (unsigned long)plogT[plogTail], (unsigned)plogL[plogTail]);
+    plogTail = (plogTail + 1) % PULSE_LOG_SIZE;
+  }
+}
+#else
+void pulseLogFlush() {}
+#endif
+
 void IRAM_ATTR rowerdebounceinterrupt() {
+#if PULSE_LOG
+  pulseLogAdd();
+#endif
   if ((long)(micros() - last_micros) >= debouncing_time * 1000) {
     rowerinterrupt();
     last_micros = micros();
@@ -1168,6 +1214,7 @@ void rowing() {
     }
     
     updateMovingTime();
+    pulseLogFlush();
 
     static unsigned long lastDrawMs = 0;
     if (millis() - lastDrawMs >= (rowerIdle() ? DISPLAY_REFRESH_IDLE_MS : DISPLAY_REFRESH_ROWING_MS)) {
