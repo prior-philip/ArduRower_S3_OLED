@@ -23,6 +23,11 @@ Port of https://github.com/zpukr/ArduRower (original: Heltec WiFi Kit 32 + SSD13
   (the BLE link drops). The next reed pulse (GPIO2 LOW, internal pull-up kept in sleep) wakes and restarts the sketch (~1 s boot).
 - Make sure the reed switch is not parked closed, otherwise it wakes immediately.
 
+## Timer
+The elapsed time pauses while m/s or strokes/min is zero (below 0.05 m/s / 1 spm) and resumes when both are
+non-zero again. The averages sent over BLE use this moving time too. Because m/s and strokes/min are rolling
+averages, the timer stops a few seconds after the last stroke (about 7 s) and starts about 1-2 s after the first.
+
 ## Options (top of the sketch)
 - `MAGNETS_PER_ROUND` (default 4): magnets on the rotor = reed pulses per revolution. Meters per pulse
   and the stroke-detection thresholds scale with it (4 -> 3.156 pulses/m as in the original firmware).

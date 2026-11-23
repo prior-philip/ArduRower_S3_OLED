@@ -222,6 +222,7 @@ RunningAverage battery_RA(40);
 
 /*-----------------VARIABLES-----------------------------*/
 long start;
+unsigned long movingMs = 0;   // elapsed time that only runs while rowing (paused when m/s or spm is zero)
 float rounds;
 volatile unsigned long click_time = 0;
 volatile unsigned long last_click_time = 0;
@@ -917,6 +918,7 @@ void reset() {
   timer1 = 0;
   timer2 = 0;
   start = millis();
+  movingMs = 0;
   old_split = millis();
   strokes = 0;
   old_strokes = 0;
@@ -958,9 +960,18 @@ int read_LCD_buttons()
   */
 }
 
+// Timer pause: elapsed time only runs while the boat moves and strokes are counted
+// (m/s and strokes/min both non-zero). Call regularly from the rowing loop.
+void updateMovingTime() {
+  static unsigned long lastMs = 0;
+  unsigned long now = millis();
+  if (lastMs != 0 && Ms >= 0.05f && spm >= 1.0f) movingMs += now - lastMs;   // NaN compares false -> paused
+  lastMs = now;
+}
+
 // Elapsed time as m:ss (or h:mm once past an hour), as in the original
 void formatElapsed(char *out, size_t n) {
-  unsigned long t = (millis() - start) / 1000UL;
+  unsigned long t = movingMs / 1000UL;
   unsigned h = t / 3600UL, m = (t % 3600UL) / 60UL, sec = t % 60UL;
   if (h > 0) snprintf(out, n, "%u:%02u", h, m);
   else       snprintf(out, n, "%02u:%02u", m, sec);
@@ -1102,7 +1113,7 @@ void rowing() {
 
         // (the original used milliseconds*1000 in a 32-bit long and integer divisions: the averages
         //  were 0 / infinite and elapsed time wrapped after ~36 min)
-        float elapsedS = (millis() - start) / 1000.0f;
+        float elapsedS = movingMs / 1000.0f;   // moving time (timer pauses when standing still)
         if (elapsedS < 1.0f) elapsedS = 1.0f;
         float avrMs = meters / elapsedS;                       // average speed [m/s]
         rdKpi.strokeRate = (int)round(spm + old_spm);          // 0.5 strokes/min units
@@ -1156,6 +1167,8 @@ void rowing() {
 
     }
     
+    updateMovingTime();
+
     static unsigned long lastDrawMs = 0;
     if (millis() - lastDrawMs >= (rowerIdle() ? DISPLAY_REFRESH_IDLE_MS : DISPLAY_REFRESH_ROWING_MS)) {
       lastDrawMs = millis();
