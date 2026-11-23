@@ -29,12 +29,4 @@ class ArduRowerApp extends Application.AppBase {
         _view = view;
         return [ view ];
     }
-
-    function onSettingsChanged() as Void {
-        var v = _view;
-        if (v != null) {
-            v.loadSettings();
-        }
-        WatchUi.requestUpdate();
-    }
 }

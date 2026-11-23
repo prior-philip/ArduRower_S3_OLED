@@ -8,8 +8,11 @@ over BLE (FTMS Rower Data) and shows and records the rower values.
   advertisement), pairs, enables notifications on Rower Data (0x2AD1) and Battery (0x2A19).
   Reconnects on its own; if that fails for 20 s it scans again.
 - Full-screen field: rowing time, meters, pace /500 m, strokes/min, watts, rower battery.
-- Smaller fields: one value, chosen in the field settings (Connect IQ app on the phone):
-  pace, power, stroke rate, distance or rowing time. The label line shows the connection status.
+- Half-screen fields (2/3-field layouts): 2x2 grid. Top half: time, meters, pace, spm;
+  bottom half: pace, spm, watts, meters.
+- Small fields: one value, chosen by position: top = rowing time, middle = pace, bottom = stroke rate;
+  quadrants: top-left time, top-right meters, bottom-left spm, bottom-right watts.
+  The label line shows the connection status while not receiving.
 - FIT recording (developer fields): stroke rate, power and pace as charts; average stroke rate,
   average power, average pace, distance and strokes in the activity summary on Garmin Connect.
 
