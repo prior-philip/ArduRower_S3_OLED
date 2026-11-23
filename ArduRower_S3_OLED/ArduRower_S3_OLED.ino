@@ -46,6 +46,9 @@ U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(DISPLAY_ROTATION, U8X8_PIN_NONE);
 // CPU clock in MHz. 80 is the lowest the ESP32-S3 can run with BLE active (default would be 240).
 #define CPU_MHZ 80
 
+// Screen refresh interval while rowing. 1000 = once per second (matches the 1 s data update).
+#define DISPLAY_REFRESH_MS 1000
+
 // Global Define 
 #define _VERSION          0.05
 #define BLE_SERVICE_NAME "WR S4BL3"           // name of the Bluetooth Service 
@@ -1150,8 +1153,8 @@ void rowing() {
 
     }
     
-    static unsigned long lastDrawMs = 0;       // redraw 5x/s: the I2C transfer keeps the CPU busy otherwise
-    if (millis() - lastDrawMs >= 200) {
+    static unsigned long lastDrawMs = 0;       // the I2C transfer keeps the CPU busy, so don't redraw continuously
+    if (millis() - lastDrawMs >= DISPLAY_REFRESH_MS) {
       lastDrawMs = millis();
       drawRowingScreen();
     }

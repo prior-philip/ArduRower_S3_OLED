@@ -23,7 +23,7 @@ A connected watch/app keeps the board awake, so a paused workout does not drop t
 Make sure the reed switch is not parked closed, otherwise it wakes immediately.
 
 ## Power
-CPU runs at 80 MHz (`CPU_MHZ`, the minimum with BLE active; default would be 240) and the screen is redrawn 5x/s.
+CPU runs at 80 MHz (`CPU_MHZ`, the minimum with BLE active; default would be 240) and the screen is redrawn once per second (`DISPLAY_REFRESH_MS`).
 
 ## Options (top of the sketch)
 - `MAGNETS_PER_ROUND` (default 4): magnets on the rotor = reed pulses per revolution. Meters per pulse
