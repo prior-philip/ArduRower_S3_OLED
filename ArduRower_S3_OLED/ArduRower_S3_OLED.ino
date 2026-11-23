@@ -41,13 +41,16 @@ U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(DISPLAY_ROTATION, U8X8_PIN_NONE);
 
 // Deep sleep: after this much time without a sensor pulse the board goes to
 // deep sleep and wakes again on the next reed-switch pulse on GPIO2.
-#define IDLE_SLEEP_MS  300000UL    // 5 minutes without pulses AND without a BLE connection
+#define IDLE_DETECT_MS 1000UL      // no pulse for this long = "idle": display refresh is reduced
+#define IDLE_SLEEP_MS  300000UL    // deep sleep after this long without pulses (5 min), BLE connected or not
 
 // CPU clock in MHz. 80 is the lowest the ESP32-S3 can run with BLE active (default would be 240).
 #define CPU_MHZ 80
 
-// Screen refresh interval while rowing. 1000 = once per second (matches the 1 s data update).
-#define DISPLAY_REFRESH_MS 1000
+// Screen refresh intervals: while rowing only the CPU clock is reduced (normal refresh),
+// once idle (no pulse for IDLE_DETECT_MS) the refresh is reduced to once per second.
+#define DISPLAY_REFRESH_ROWING_MS 200
+#define DISPLAY_REFRESH_IDLE_MS   1000
 
 // Global Define 
 #define _VERSION          0.05
@@ -659,15 +662,15 @@ void drawWaitingScreen() {
   u8g2.sendBuffer();
 }
 
-// true when there were no sensor pulses and no BLE connection for IDLE_SLEEP_MS.
-// A connected watch/app keeps the board awake: sleeping would drop the link and the
-// data field may not reconnect on its own after the next wake-up.
+// true when there were no sensor pulses for IDLE_DETECT_MS
+bool rowerIdle() {
+  return (millis() - lastActivityMs) > IDLE_DETECT_MS;
+}
+
+// true when there were no sensor pulses for IDLE_SLEEP_MS (independent of a BLE connection;
+// going to sleep drops a connected watch/app, it reconnects when rowing resumes)
 bool idleTooLong() {
-  static unsigned long lastConnectedMs = 0;
-  unsigned long now = millis();
-  if (deviceConnected) lastConnectedMs = now;
-  unsigned long ref = (lastActivityMs > lastConnectedMs) ? lastActivityMs : lastConnectedMs;
-  return (now - ref) > IDLE_SLEEP_MS;
+  return (millis() - lastActivityMs) > IDLE_SLEEP_MS;
 }
 
 // Put the board into deep sleep. Wakes on the next reed-switch pulse
@@ -1153,8 +1156,8 @@ void rowing() {
 
     }
     
-    static unsigned long lastDrawMs = 0;       // the I2C transfer keeps the CPU busy, so don't redraw continuously
-    if (millis() - lastDrawMs >= DISPLAY_REFRESH_MS) {
+    static unsigned long lastDrawMs = 0;
+    if (millis() - lastDrawMs >= (rowerIdle() ? DISPLAY_REFRESH_IDLE_MS : DISPLAY_REFRESH_ROWING_MS)) {
       lastDrawMs = millis();
       drawRowingScreen();
     }

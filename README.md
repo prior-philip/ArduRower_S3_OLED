@@ -16,14 +16,12 @@ Port of https://github.com/zpukr/ArduRower (original: Heltec WiFi Kit 32 + SSD13
 | Button (reset trip) | 0 (onboard BOOT) |
 | Battery sense (optional, `ENABLE_BATTERY 1`) | 1, 1:1 divider from VBAT |
 
-## Deep sleep
-No reed pulse **and** no BLE connection for `IDLE_SLEEP_MS` (5 min) -> display off + deep sleep. The next reed
-pulse (GPIO2 LOW, internal pull-up kept in sleep) wakes and restarts the sketch (~1 s boot).
-A connected watch/app keeps the board awake, so a paused workout does not drop the link.
-Make sure the reed switch is not parked closed, otherwise it wakes immediately.
-
-## Power
-CPU runs at 80 MHz (`CPU_MHZ`, the minimum with BLE active; default would be 240) and the screen is redrawn once per second (`DISPLAY_REFRESH_MS`).
+## Power / deep sleep
+- CPU runs at 80 MHz (`CPU_MHZ`, the minimum with BLE active; default would be 240). That is the only measure while rowing.
+- No reed pulse for 1 s (`IDLE_DETECT_MS`) = idle: the display refresh drops from 5x/s to 1x/s.
+- No pulse for `IDLE_SLEEP_MS` (5 min) -> display off + deep sleep, whether a watch/app is connected or not
+  (the BLE link drops). The next reed pulse (GPIO2 LOW, internal pull-up kept in sleep) wakes and restarts the sketch (~1 s boot).
+- Make sure the reed switch is not parked closed, otherwise it wakes immediately.
 
 ## Options (top of the sketch)
 - `MAGNETS_PER_ROUND` (default 4): magnets on the rotor = reed pulses per revolution. Meters per pulse
