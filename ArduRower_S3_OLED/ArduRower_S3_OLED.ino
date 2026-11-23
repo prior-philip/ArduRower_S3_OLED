@@ -53,7 +53,7 @@ U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(DISPLAY_ROTATION, U8X8_PIN_NONE);
 #define DISPLAY_REFRESH_IDLE_MS   1000
 
 // Global Define 
-#define _VERSION          0.05
+#define _VERSION          1.00
 #define BLE_SERVICE_NAME "WR S4BL3"           // name of the Bluetooth Service 
 
 // Battery monitoring (optional). The S3-Zero has no battery sense of its own:
@@ -205,8 +205,8 @@ volatile unsigned long lastActivityMs = 0;   // last sensor pulse, for idle deep
 #define SENSOR_MODE SENSOR_PULLEY
 
 // -- pulley mode settings
-#define PULLEY_DIAMETER_CM   11.0f  // strap runs over this pulley, 1 magnet = 1 pulse per turn
-#define SPEED_FACTOR_K       2.8f   // boat speed [m/s] = K x handle speed during the drive. Calibrate:
+#define PULLEY_DIAMETER_CM   12.0f  // strap runs over this pulley, 1 magnet = 1 pulse per turn
+#define SPEED_FACTOR_K       2.24f   // boat speed [m/s] = K x handle speed during the drive. Calibrate:
                                     // K_new = K_old x (real distance / shown distance)
 #define STROKE_GAP_MIN_MS    400    // a pulse gap must be at least this long ...
 #define STROKE_GAP_PCT       160    // ... and this % of the median pulse interval to start a stroke
@@ -1263,6 +1263,10 @@ void setup() {
   SerialDebug.println(" * DIY_Rower BLE Module ");
   SerialDebug.print  (" * Version ");
   SerialDebug.println(_VERSION);
+  SerialDebug.print  (" * Type ");
+  SerialDebug.println(SENSOR_PULLEY);
+  SerialDebug.print  (" * Factor ");
+  SerialDebug.println(SPEED_FACTOR_K);
   SerialDebug.println(" ***********************************/");
 
   /*
