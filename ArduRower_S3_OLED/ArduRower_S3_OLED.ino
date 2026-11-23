@@ -41,7 +41,10 @@ U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(DISPLAY_ROTATION, U8X8_PIN_NONE);
 
 // Deep sleep: after this much time without a sensor pulse the board goes to
 // deep sleep and wakes again on the next reed-switch pulse on GPIO2.
-#define IDLE_SLEEP_MS  300000UL    // 5 minutes
+#define IDLE_SLEEP_MS  300000UL    // 5 minutes without pulses AND without a BLE connection
+
+// CPU clock in MHz. 80 is the lowest the ESP32-S3 can run with BLE active (default would be 240).
+#define CPU_MHZ 80
 
 // Global Define 
 #define _VERSION          0.05
@@ -81,7 +84,7 @@ BLECharacteristic * pCharacteristic27;
 BLECharacteristic * pCharacteristic28;
 BLECharacteristic * pCharacteristic29;
 
-bool deviceConnected = false;
+volatile bool deviceConnected = false;
 bool oldDeviceConnected = false;
 //uint32_t value = 0;
 //uint8_t txValue = 0;
@@ -587,6 +590,14 @@ void setCxRowerData(){
 
 }
 
+// FTMS pace: seconds per 500 m (uint16). Standing still -> 65535 (what the original firmware
+// sent in that case, so existing apps keep working).
+int paceSecPer500(float speedMs) {
+  if (speedMs < 0.0077f) return 65535;
+  float p = 500.0f / speedMs;
+  return (p > 65535.0f) ? 65535 : (int)round(p);
+}
+
 void setCxBattery(){
   #ifdef DEEPTRACE
     SerialDebug.printf("sendBleBattery() start");
@@ -645,6 +656,17 @@ void drawWaitingScreen() {
   u8g2.sendBuffer();
 }
 
+// true when there were no sensor pulses and no BLE connection for IDLE_SLEEP_MS.
+// A connected watch/app keeps the board awake: sleeping would drop the link and the
+// data field may not reconnect on its own after the next wake-up.
+bool idleTooLong() {
+  static unsigned long lastConnectedMs = 0;
+  unsigned long now = millis();
+  if (deviceConnected) lastConnectedMs = now;
+  unsigned long ref = (lastActivityMs > lastConnectedMs) ? lastActivityMs : lastConnectedMs;
+  return (now - ref) > IDLE_SLEEP_MS;
+}
+
 // Put the board into deep sleep. Wakes on the next reed-switch pulse
 // (GPIO2 pulled LOW), then runs setup() again from the start.
 void goToSleep() {
@@ -675,7 +697,7 @@ void row_start() {
   lastActivityMs = millis();
   unsigned long pressStart = 0;
   while (clicks == 0) {
-    if (millis() - lastActivityMs > IDLE_SLEEP_MS) goToSleep();
+    if (idleTooLong()) goToSleep();
     if (digitalRead(BUTTONSPIN) == LOW) {          // long press BOOT -> demo mode
       if (pressStart == 0) pressStart = millis();
       else if (!simActive && millis() - pressStart > 1000) {
@@ -985,6 +1007,8 @@ void drawRowingScreen() {
 
 void setup() {
 
+  setCpuFrequencyMhz(CPU_MHZ);   // save battery: nothing here needs more than 80 MHz
+
   bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0);
 
   // Start the OLED Display
@@ -1070,17 +1094,20 @@ void rowing() {
 
       if (deviceConnected) {        //** Send a value to protopie. The value is in txValue **//
 
-        long sec = 1000 * (millis() - start);
-        rdKpi.strokeRate = (int)round(spm + old_spm);
+        // (the original used milliseconds*1000 in a 32-bit long and integer divisions: the averages
+        //  were 0 / infinite and elapsed time wrapped after ~36 min)
+        float elapsedS = (millis() - start) / 1000.0f;
+        if (elapsedS < 1.0f) elapsedS = 1.0f;
+        float avrMs = meters / elapsedS;                       // average speed [m/s]
+        rdKpi.strokeRate = (int)round(spm + old_spm);          // 0.5 strokes/min units
         rdKpi.strokeCount = strokes;
-        rdKpi.averageStokeRate = (int)(strokes * 60 * 2 / sec);
+        rdKpi.averageStokeRate = constrain((int)round(strokes * 120.0f / elapsedS), 0, 255);
         rdKpi.totalDistance = meters;
-        rdKpi.instantaneousPace  = (int)round(500 / Ms); // pace for 500m
-        float avrMs = meters / sec;
-        rdKpi.averagePace = (int)round(500 / avrMs);
-        rdKpi.instantaneousPower = (int)round(2.8 * Ms * Ms * Ms); //https://www.concept2.com/indoor-rowers/training/calculators/watts-calculator
-        rdKpi.averagePower = (int)round(2.8 * avrMs * avrMs * avrMs);
-        rdKpi.elapsedTime = sec;
+        rdKpi.instantaneousPace = paceSecPer500(Ms);
+        rdKpi.averagePace = paceSecPer500(avrMs);
+        rdKpi.instantaneousPower = (int)round(2.8f * Ms * Ms * Ms); //https://www.concept2.com/indoor-rowers/training/calculators/watts-calculator
+        rdKpi.averagePower = (int)round(2.8f * avrMs * avrMs * avrMs);
+        rdKpi.elapsedTime = (int)constrain(elapsedS, 0.0f, 65535.0f);   // seconds
 
         setCxRowerData();
         //setCxLightRowerData();
@@ -1123,10 +1150,14 @@ void rowing() {
 
     }
     
-    drawRowingScreen();
+    static unsigned long lastDrawMs = 0;       // redraw 5x/s: the I2C transfer keeps the CPU busy otherwise
+    if (millis() - lastDrawMs >= 200) {
+      lastDrawMs = millis();
+      drawRowingScreen();
+    }
 
     // no pulses for a while -> deep sleep (wakes on next pulse)
-    if (millis() - lastActivityMs > IDLE_SLEEP_MS) goToSleep();
+    if (idleTooLong()) goToSleep();
 
     /* if select button is pressed reset */
     switch (read_LCD_buttons())
